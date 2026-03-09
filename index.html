@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Connect｜報告書おまとめツール</title>
+    <!-- Tailwind CSS (スタイリング用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+    <!-- PDF-lib (PDF操作ライブラリ) -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- SortableJS (ドラッグ＆ドロップ並び替え用) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+    <script>
+        // Material Design 3 カラースキーム
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6750A4',
+                        onPrimary: '#FFFFFF',
+                        primaryContainer: '#EADDFF',
+                        onPrimaryContainer: '#21005D',
+                        secondaryContainer: '#E8DEF8',
+                        onSecondaryContainer: '#1D192B',
+                        error: '#B3261E',
+                        onError: '#FFFFFF',
+                        errorContainer: '#F9DEDC',
+                        onErrorContainer: '#410E0B',
+                        surface: '#FEF7FF',
+                        onSurface: '#1D1B20',
+                        surfaceVariant: '#E7E0EC',
+                        onSurfaceVariant: '#49454F',
+                        outline: '#79747E',
+                    },
+                    boxShadow: {
+                        'md3-1': '0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15)',
+                        'md3-2': '0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: theme('colors.surface');
+            color: theme('colors.onSurface');
+            font-family: 'Roboto', 'Noto Sans JP', sans-serif;
+        }
+        .drag-handle {
+            cursor: grab;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+            background-color: theme('colors.primaryContainer');
+        }
+        .file-input-wrapper {
+            transition: all 0.2s ease-in-out;
+        }
+        .file-input-wrapper.dragover {
+            background-color: theme('colors.surfaceVariant');
+            border-color: theme('colors.primary');
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.outline');
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 sm:p-8">
+
+    <div class="bg-white w-full max-w-2xl rounded-[28px] shadow-md3-1 p-6 sm:p-10 flex flex-col gap-6 transition-all">
+        
+        <!-- ヘッダー -->
+        <div class="text-center">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primaryContainer text-onPrimaryContainer mb-4 shadow-sm">
+                <span class="material-icons-outlined text-3xl">hub</span>
+            </div>
+            <h1 class="text-2xl font-bold text-onSurface mb-2 tracking-tight">Report Connect</h1>
+            <p class="text-onSurfaceVariant text-sm">
+                複数の報告書をスマートに連結。2つ目以降の<span class="font-bold text-primary italic">表紙を自動カット</span>します。
+            </p>
+        </div>
+
+        <!-- アップロードエリア -->
+        <div id="drop-zone" class="file-input-wrapper relative border-2 border-dashed border-outline rounded-3xl p-10 text-center cursor-pointer hover:bg-surfaceVariant group">
+            <input type="file" id="file-input" multiple accept="application/pdf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+            <span class="material-icons-outlined text-4xl text-primary mb-3 group-hover:scale-110 transition-transform">add_box</span>
+            <p class="text-onSurface font-medium">ファイルをアップロード</p>
+            <p class="text-onSurfaceVariant text-xs mt-1">PDFをここにドラッグ＆ドロップ</p>
+        </div>
+
+        <!-- ファイルリスト -->
+        <div class="flex flex-col gap-2">
+            <div class="flex justify-between items-end px-2">
+                <h2 class="text-[11px] font-bold text-outline uppercase tracking-[0.2em]">連結プレビュー</h2>
+                <button id="clear-btn" class="hidden text-xs text-error hover:bg-errorContainer px-3 py-1 rounded-full transition-colors font-medium">クリア</button>
+            </div>
+            <ul id="file-list" class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2 min-h-[60px] empty:hidden">
+                <!-- ファイルアイテム挿入 -->
+            </ul>
+            <div id="empty-state" class="text-center py-8 border-2 border-dotted border-surfaceVariant rounded-2xl text-outline text-sm italic">
+                ファイルが選択されていません
+            </div>
+        </div>
+
+        <!-- アクション -->
+        <div class="flex flex-col items-center gap-4 mt-2">
+            <button id="merge-btn" disabled class="w-full sm:w-auto bg-primary text-onPrimary px-12 py-4 rounded-full font-bold shadow-md3-1 hover:shadow-md3-2 hover:scale-[1.01] active:scale-95 disabled:bg-surfaceVariant disabled:text-outline disabled:shadow-none transition-all flex items-center justify-center gap-3 text-base">
+                <span class="material-icons-outlined">link</span>
+                レポートを結合する
+            </button>
+            <div id="status-message" class="text-sm h-5 font-medium transition-colors"></div>
+        </div>
+
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
+        const fileListEl = document.getElementById('file-list');
+        const emptyState = document.getElementById('empty-state');
+        const mergeBtn = document.getElementById('merge-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const statusMsg = document.getElementById('status-message');
+
+        let uploadedFiles = [];
+
+        const sortable = new Sortable(fileListEl, {
+            animation: 250,
+            handle: '.drag-handle',
+            ghostClass: 'sortable-ghost',
+            onEnd: () => {
+                const newOrder = [];
+                const items = fileListEl.querySelectorAll('li');
+                items.forEach(item => {
+                    const originalIndex = parseInt(item.getAttribute('data-index'), 10);
+                    newOrder.push(uploadedFiles[originalIndex]);
+                });
+                uploadedFiles = newOrder;
+                renderFileList();
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            addFiles(e.target.files);
+            fileInput.value = '';
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                addFiles(e.dataTransfer.files);
+            }
+        });
+
+        function addFiles(files) {
+            const newFiles = Array.from(files).filter(file => file.type === 'application/pdf');
+            if (newFiles.length === 0) return;
+            uploadedFiles = [...uploadedFiles, ...newFiles];
+            renderFileList();
+            statusMsg.innerText = '';
+        }
+
+        clearBtn.addEventListener('click', () => {
+            uploadedFiles = [];
+            renderFileList();
+            statusMsg.innerText = '';
+        });
+
+        window.removeFile = function(index) {
+            uploadedFiles.splice(index, 1);
+            renderFileList();
+        }
+
+        function renderFileList() {
+            fileListEl.innerHTML = '';
+            if (uploadedFiles.length === 0) {
+                emptyState.style.display = 'block';
+                clearBtn.classList.add('hidden');
+                mergeBtn.disabled = true;
+                return;
+            }
+            emptyState.style.display = 'none';
+            clearBtn.classList.remove('hidden');
+            mergeBtn.disabled = false;
+
+            uploadedFiles.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'flex items-center bg-white border border-surfaceVariant p-4 rounded-2xl gap-3 group shadow-sm hover:border-primary transition-all';
+                li.setAttribute('data-index', index);
+
+                const isFirst = index === 0;
+                const badgeClass = isFirst 
+                    ? 'bg-primaryContainer text-onPrimaryContainer' 
+                    : 'bg-surfaceVariant text-onSurfaceVariant';
+                const badgeText = isFirst ? 'Master / 表紙あり' : 'Sub / 表紙カット';
+
+                li.innerHTML = `
+                    <span class="material-icons-outlined drag-handle text-outline hover:text-primary transition-colors">drag_handle</span>
+                    <div class="flex-1 min-w-0 flex flex-col gap-1">
+                        <span class="truncate text-sm font-medium text-onSurface" title="${file.name}">${file.name}</span>
+                        <div class="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded w-fit font-bold uppercase tracking-wider ${badgeClass}">
+                            ${badgeText}
+                        </div>
+                    </div>
+                    <button type="button" class="text-outline hover:text-error transition-colors p-1 rounded-full flex items-center justify-center" onclick="removeFile(${index})">
+                        <span class="material-icons-outlined text-[20px]">delete_sweep</span>
+                    </button>
+                `;
+                fileListEl.appendChild(li);
+            });
+        }
+
+        mergeBtn.addEventListener('click', async () => {
+            if (uploadedFiles.length === 0) return;
+            statusMsg.innerText = 'Connect中...';
+            statusMsg.className = 'text-sm h-5 font-bold text-primary animate-pulse';
+            mergeBtn.disabled = true;
+            document.body.style.cursor = 'wait';
+
+            try {
+                const mergedPdf = await PDFLib.PDFDocument.create();
+                for (let i = 0; i < uploadedFiles.length; i++) {
+                    const fileBytes = await uploadedFiles[i].arrayBuffer();
+                    const pdf = await PDFLib.PDFDocument.load(fileBytes);
+                    const pageCount = pdf.getPageCount();
+                    let pagesToCopy = i === 0 
+                        ? Array.from({ length: pageCount }, (_, idx) => idx)
+                        : (pageCount > 1 ? Array.from({ length: pageCount - 1 }, (_, idx) => idx + 1) : []);
+                    
+                    if (pagesToCopy.length > 0) {
+                        const copiedPages = await mergedPdf.copyPages(pdf, pagesToCopy);
+                        copiedPages.forEach(page => mergedPdf.addPage(page));
+                    }
+                }
+                const mergedPdfBytes = await mergedPdf.save();
+                const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+                link.download = `ReportConnect_${dateStr}.pdf`;
+                link.click();
+                URL.revokeObjectURL(url);
+                statusMsg.innerText = '✅ 結合が完了しました';
+                statusMsg.className = 'text-sm h-5 font-bold text-primary';
+            } catch (error) {
+                console.error(error);
+                statusMsg.innerText = '⚠️ エラーが発生しました';
+                statusMsg.className = 'text-sm h-5 font-bold text-error';
+            } finally {
+                mergeBtn.disabled = false;
+                document.body.style.cursor = 'default';
+            }
+        });
+    </script>
+</body>
+</html>
